@@ -23,6 +23,7 @@ namespace EdudexApp
     public partial class Form1 : SfForm
 
     {
+        public SshClient sshClient;
         private string personal_file = "";
         private string qualification_enrolment_file = "";
         private string student_fte_file = "";
@@ -30,6 +31,7 @@ namespace EdudexApp
         private string readfile;
         private int n = 0;
         private string selectedFile;
+        private int db_Action;
         private string selectedDate; // The logged processed date of Edudex files in Database
 
         public static List<personInformation> personInfo = new List<personInformation>();
@@ -43,14 +45,16 @@ namespace EdudexApp
         public static List<string> submissions = new List<string>();
 
         // ssh connection settings-------------------------------------
-        public SshClient sshClient;
-        static string host = "192.168.0.19";      //ENTER SERVER HOST
-        static string user = "sacapuser";             //ENTER USER
-        static int sshport = 22;
+
+        public string host;      //ENTER SERVER HOST
+        public string user;             //ENTER USER
+        public int sshport;
         // Console.Write("Password: ");      //ENTER SERVER PASSWORD
-        static string passwd = "nMnTFBWR59mJ";
+        public string passwd;
         // --------------------------------------------------------------
-        public PasswordConnectionInfo connectionInfo = new PasswordConnectionInfo(host, sshport, user, passwd);
+
+
+        public PasswordConnectionInfo connectionInfo; // = new PasswordConnectionInfo(host, sshport, user, passwd);
         public string connectionString = ConfigurationManager.ConnectionStrings["MySql"].ConnectionString;
         //public IDbConnection db = new SqlConnection(System.Configuration.ConfigurationManager.ConnectionStrings["DefaultConnection"].ConnectionString);
 
@@ -67,9 +71,17 @@ namespace EdudexApp
             button1.Visible = false;
             button2.Visible = false;
             button3.Visible = false;
+            button4.Visible = false;
             groupBox4.Visible = false;
+            host = Properties.Settings.Default.hostip;
+            user = Properties.Settings.Default.user;
+            sshport = Properties.Settings.Default.sshport;
+            passwd = Properties.Settings.Default.password;
+            //PasswordConnectionInfo 
+            connectionInfo = new PasswordConnectionInfo(host, sshport, user, passwd);
             folderBrowserDialog1.SelectedPath = Properties.Settings.Default.edudexOut;
         }
+    
 
         private void openToolStripMenuItem_Click(object sender, EventArgs e)
         {
@@ -235,7 +247,7 @@ namespace EdudexApp
                 if (portFwd.IsStarted)
                 {
                     // toolStripButton1.Image = @("./assets/Connect_greenOverlay_16x32.bmp");
-                    label1.Text = "Port Forwarding has started";
+                    label1.Text = "Port Forwarding has started : BoundPort " + portFwd.BoundPort +" Host: "+portFwd.Host;
                 }
                 else
                 {
@@ -280,6 +292,7 @@ namespace EdudexApp
                             connection.Open();
                             connection.Execute("edudex_create_submission_tables", new { the_date = myDate }, commandType: CommandType.StoredProcedure);
                             connection.Close();
+                            MessageBox.Show("Edudex tables created in Database");
                         }
                     }
                     catch (Exception ex)
@@ -494,8 +507,9 @@ namespace EdudexApp
                         }
 
 
-
+                       // listBox1.Items.Remove(selectedFile);
                         connection.Close();
+                        MessageBox.Show("All files loaded into Database Tables");
                     }
                 }
                 else
@@ -567,127 +581,156 @@ namespace EdudexApp
 
         private void button4_Click(object sender, EventArgs e)
         {
-
             string Rec_file = "CHED-666";
             string db_filename = "";
             string path;
             string fullname;
             string fileHeader;
 
-            if (string.IsNullOrEmpty(selectedDate))
+            if (db_Action == 1)
             {
-                MessageBox.Show("Please select 'Submission Date' from database records!!");
+                DialogResult dialog = MessageBox.Show("Are you sure you want to Delete?","Delete Edudex Tables", MessageBoxButtons.YesNo);
+                if (dialog == DialogResult.Yes)
+                {
+                    // delete tables in Edudex database
+                    using (var connection = new MySqlConnection(connectionString))
+                    {
+                        // 1. run stored procedure to process data
+                        connection.Open();
+                        connection.Execute("edudex_delete_submission_tables",new { submission_Date = selectedDate }, commandType: CommandType.StoredProcedure);
+
+                        // 2. Load list of processed_data_logs into combobox
+                        // var allsubmissions = connection.Query(sql);
+                        connection.Close();
+                        string msg = "Submission date of "+ selectedDate +" have been deleted!!";
+                        MessageBox.Show(msg);
+                    }
+                }
+            }
+            else if (db_Action == 2)
+            {
+                if (string.IsNullOrEmpty(selectedDate))
+                {
+                    MessageBox.Show("Please select 'Submission Date' from database records!!");
+                }
+                else
+                {
+                    //1. get folder path to write files
+                    DialogResult result = folderBrowserDialog1.ShowDialog();
+                    if (result == DialogResult.OK)
+                    {
+                        path = folderBrowserDialog1.SelectedPath;
+                        Properties.Settings.Default.edudexOut = path;
+                        Properties.Settings.Default.Save();
+                        string date = selectedDate.Substring(2);
+                        //2. Read table data into collections
+                        var sql = "SELECT national_id, alternative_id, alternative_id_type, equity_code, nationality_code, home_language_code, " +
+                            "gender_code, citizen_residence_status_code, socioeconomic_status_code, disability_status_code, last_name, first_name, " +
+                            "middle_name, title, birth_date, home_address_1, home_address_2,home_address_3, postal_address_1, postal_address_2, " +
+                            "postal_address_3, home_address_postal_code, postal_addr_postal_code, person_phone_number, cellphone_number, fax_number, email_address, " +
+                            "province_code, provider_code, provider_etqa_id, previous_lastname, previous_alternative_id, previous_alternative_id_type, previous_provider_code, " +
+                            "previous_provider_etqa_id, seeing_rating_id, hearing_rating_id, communication_rating_id, walking_rating_id, remembering_rating_id, " +
+                            "selfcare_rating_id, date_stamp FROM personal_info_6661" + date;
+
+                        using (var connection = new MySqlConnection(connectionString))
+                        {
+                            connection.Open();
+                            //1. check to see if table exists in database and if it has records
+                            DB_personInfo = connection.Query<personInformation>(sql).ToList();
+
+                            connection.Close();
+                        }
+                        //3. write info to files
+                        fullname = Rec_file + "1" + date + ".dat";
+                        db_filename = Path.Combine(path, fullname);
+                        var engine = new FileHelperEngine<personInformation>();
+                        fileHeader = "HEADER621 PERSON INFORMATION  " + DB_personInfo.Count.ToString();
+                        engine.HeaderText = fileHeader.PadRight(40);
+                        engine.WriteFile(db_filename, DB_personInfo);
+                        listBox2.Items.Add(fullname);
+                        this.Invalidate();
+
+                        var sql1 = "SELECT national_id, alternative_id, alternative_id_type, qualification_code, learner_achievement_status_id, assessor_registration_number, " +
+                           "learner_achievement_type_id, learner_achievement_date, learner_enrolled_date, honours_classification, part_of, learnership_code, provider_code, " +
+                           "provider_etqa_id, assessor_etqa_id, cesm1, cesm2, most_recent_enrolment_date, date_stamp FROM qualification_enrolment_6663" + date;
+
+                        using (var connection = new MySqlConnection(connectionString))
+                        {
+                            connection.Open();
+                            //1. check to see if table exists in database and if it has records
+
+                            DB_qualifications = connection.Query<qualificationEnrolment>(sql1).ToList();
+
+                            connection.Close();
+                        }
+                        fullname = Rec_file + "3" + date + ".dat";
+                        db_filename = Path.Combine(path, fullname);
+                        var engine1 = new FileHelperEngine<qualificationEnrolment>();
+                        fileHeader = "HEADER621 QUALIFICATION ENROL " + DB_qualifications.Count.ToString();
+                        engine1.HeaderText = fileHeader.PadRight(40);
+                        engine1.WriteFile(db_filename, DB_qualifications);
+                        listBox2.Items.Add(fullname);
+
+
+                        var sql2 = "SELECT national_id, alternative_id, alternative_id_type, staff_category_id, filler_01, staff_category_etqa_id, appointment_date, " +
+                            "termination_date, employment_status_id, filler_02, provider_code, provider_etqa_id, highest_qualification_type_id, appointment_type_id, " +
+                            "fte, date_stamp FROM staff_employment_6665" + date;
+
+                        using (var connection = new MySqlConnection(connectionString))
+                        {
+                            connection.Open();
+                            //1. check to see if table exists in database and if it has records
+
+                            DB_staff = connection.Query<staffEmployment>(sql2).ToList();
+
+                            connection.Close();
+                        }
+
+                        fullname = Rec_file + "5" + date + ".dat";
+                        db_filename = Path.Combine(path, fullname);
+                        var engine2 = new FileHelperEngine<staffEmployment>();
+                        fileHeader = "HEADER621 STAFF EMPLOYMENT " + DB_personInfo.Count.ToString();
+                        engine2.HeaderText = fileHeader.PadRight(40);
+                        engine2.WriteFile(db_filename, DB_staff);
+                        listBox2.Items.Add(fullname);
+
+                        //------------------------------------------------------------------------------------------------------
+                        var sql3 = "SELECT national_id, alternate_id, alternate_id_type, qualification_code, fte_year, fte, provider_code, provider_etqa_id, date_stamp " +
+                            "FROM student_fte_6668" + date;
+
+                        using (var connection = new MySqlConnection(connectionString))
+                        {
+                            connection.Open();
+                            //1. check to see if table exists in database and if it has records
+                            //var fromDB = connection.Query(sql3).ToList();
+                            DB_ftes = connection.Query<studentFTE>(sql3).ToList();
+                            connection.Close();
+                        }
+
+                        fullname = Rec_file + "8" + date + ".dat";
+                        db_filename = Path.Combine(path, fullname);
+                        var engine3 = new FileHelperEngine<studentFTE>();
+                        fileHeader = "HEADER621 STUDENT FTE  " + DB_personInfo.Count.ToString();
+                        engine3.HeaderText = fileHeader.PadRight(40);
+                        engine3.WriteFile(db_filename, DB_ftes);
+                        listBox2.Items.Add(fullname);
+                    }
+                }
             }
             else
             {
-                //1. get folder path to write files
-                DialogResult result = folderBrowserDialog1.ShowDialog();
-                if (result == DialogResult.OK)
-                {
-                    path = folderBrowserDialog1.SelectedPath;
-                    Properties.Settings.Default.edudexOut = path;
-                    Properties.Settings.Default.Save();
-                    string date = selectedDate.Substring(2);
-                    //2. Read table data into collections
-                    var sql = "SELECT national_id, alternative_id, alternative_id_type, equity_code, nationality_code, home_language_code, " +
-                        "gender_code, citizen_residence_status_code, socioeconomic_status_code, disability_status_code, last_name, first_name, " +
-                        "middle_name, title, birth_date, home_address_1, home_address_2,home_address_3, postal_address_1, postal_address_2, " +
-                        "postal_address_3, home_address_postal_code, postal_addr_postal_code, person_phone_number, cellphone_number, fax_number, email_address, " +
-                        "province_code, provider_code, provider_etqa_id, previous_lastname, previous_alternative_id, previous_alternative_id_type, previous_provider_code, " +
-                        "previous_provider_etqa_id, seeing_rating_id, hearing_rating_id, communication_rating_id, walking_rating_id, remembering_rating_id, " +
-                        "selfcare_rating_id, date_stamp FROM personal_info_6661" + date;                   
-                    
-                    using (var connection = new MySqlConnection(connectionString))
-                    {
-                        connection.Open();
-                        //1. check to see if table exists in database and if it has records
-                        DB_personInfo = connection.Query<personInformation>(sql).ToList();
-
-                        connection.Close();
-                    }
-                    //3. write info to files
-                    fullname = Rec_file + "1" + date + ".dat";
-                    db_filename = Path.Combine(path, fullname);
-                    var engine = new FileHelperEngine<personInformation>();
-                    fileHeader = "HEADER621 PERSON INFORMATION  " + DB_personInfo.Count.ToString();
-                    engine.HeaderText = fileHeader.PadRight(40);
-                    engine.WriteFile(db_filename, DB_personInfo);
-                    listBox2.Items.Add(fullname);
-                    this.Invalidate();
-
-                    var sql1 = "SELECT national_id, alternative_id, alternative_id_type, qualification_code, learner_achievement_status_id, assessor_registration_number, " +
-                       "learner_achievement_type_id, learner_achievement_date, learner_enrolled_date, honours_classification, part_of, learnership_code, provider_code, " +
-                       "provider_etqa_id, assessor_etqa_id, cesm1, cesm2, most_recent_enrolment_date, date_stamp FROM qualification_enrolment_6663" + date;
-
-                    using (var connection = new MySqlConnection(connectionString))
-                    {
-                        connection.Open();
-                        //1. check to see if table exists in database and if it has records
-
-                        DB_qualifications = connection.Query<qualificationEnrolment>(sql1).ToList();
-
-                        connection.Close();
-                    }
-                    fullname = Rec_file + "3" + date + ".dat";
-                    db_filename = Path.Combine(path, fullname);
-                    var engine1 = new FileHelperEngine<qualificationEnrolment>();
-                    fileHeader = "HEADER621 QUALIFICATION ENROL " + DB_qualifications.Count.ToString();
-                    engine1.HeaderText = fileHeader.PadRight(40);
-                    engine1.WriteFile(db_filename, DB_qualifications);
-                    listBox2.Items.Add(fullname);
-
-
-                    var sql2 = "SELECT national_id, alternative_id, alternative_id_type, staff_category_id, filler_01, staff_category_etqa_id, appointment_date, " +
-                        "termination_date, employment_status_id, filler_02, provider_code, provider_etqa_id, highest_qualification_type_id, appointment_type_id, " +
-                        "fte, date_stamp FROM staff_employment_6665" + date;
-
-                    using (var connection = new MySqlConnection(connectionString))
-                    {
-                        connection.Open();
-                        //1. check to see if table exists in database and if it has records
-
-                        DB_staff = connection.Query<staffEmployment>(sql2).ToList();
-
-                        connection.Close();
-                    }
-
-                    fullname = Rec_file + "5" + date + ".dat";
-                    db_filename = Path.Combine(path, fullname);
-                    var engine2 = new FileHelperEngine<staffEmployment>();
-                    fileHeader = "HEADER621 STAFF EMPLOYMENT " + DB_personInfo.Count.ToString();
-                    engine2.HeaderText = fileHeader.PadRight(40);
-                    engine2.WriteFile(db_filename, DB_staff);
-                    listBox2.Items.Add(fullname);
-
-                    //------------------------------------------------------------------------------------------------------
-                    var sql3 = "SELECT national_id, alternate_id, alternate_id_type, qualification_code, fte_year, fte, provider_code, provider_etqa_id, date_stamp " +
-                        "FROM student_fte_6668" + date;
-
-                    using (var connection = new MySqlConnection(connectionString))
-                    {
-                        connection.Open();
-                        //1. check to see if table exists in database and if it has records
-                        //var fromDB = connection.Query(sql3).ToList();
-                        DB_ftes = connection.Query<studentFTE>(sql3).ToList();
-                        connection.Close();
-                    }
-
-                    fullname = Rec_file + "8" + date + ".dat";
-                    db_filename = Path.Combine(path, fullname);
-                    var engine3 = new FileHelperEngine<studentFTE>();
-                    fileHeader = "HEADER621 STUDENT FTE  " + DB_personInfo.Count.ToString();
-                    engine3.HeaderText = fileHeader.PadRight(40);
-                    engine3.WriteFile(db_filename, DB_ftes);
-                    listBox2.Items.Add(fullname);
-                }
+                MessageBox.Show("Please select the option (Delete or write)");
             }
+
+           
         }
-            private void comboBox1_SelectedIndexChanged(object sender, EventArgs e)
+        private void comboBox1_SelectedIndexChanged(object sender, EventArgs e)
             {
                 selectedDate = comboBox1.Text;
+               
             }
 
-            private void toolStripButton2_Click(object sender, EventArgs e)
+        private void toolStripButton2_Click(object sender, EventArgs e)
             {
                 if (n == 1)
                 {
@@ -714,6 +757,34 @@ namespace EdudexApp
             
 
             }
-        
+
+        private void radioButton2_CheckedChanged(object sender, EventArgs e)
+        {
+            if (radioButton2.Checked && selectedDate.Length > 0)
+            {
+
+                button4.Text = "Create Edudex files from Database";
+                db_Action = 2;
+                button4.Visible = true;
+            }
+        }
+
+        private void radioButton1_CheckedChanged(object sender, EventArgs e)
+        {
+            if (radioButton1.Checked && selectedDate.Length > 0)
+            {
+                button4.Text = "Delete Tables in Database";
+                db_Action = 1;
+                button4.Visible = true;
+            }
+        }
+
+        private void settingsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            this.Hide();
+            Form2 frm = new Form2();
+            frm.FormToShowOnClosing = this;
+            frm.Show();
+        }
     }
 }

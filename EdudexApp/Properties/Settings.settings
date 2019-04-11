@@ -9,5 +9,17 @@
       <DesignTimeValue Profile="(Default)" />
       <Value Profile="(Default)" />
     </Setting>
+    <Setting Name="hostip" Type="System.String" Scope="User">
+      <Value Profile="(Default)">192.168.0.19</Value>
+    </Setting>
+    <Setting Name="user" Type="System.String" Scope="User">
+      <Value Profile="(Default)">sacapuser</Value>
+    </Setting>
+    <Setting Name="password" Type="System.String" Scope="User">
+      <Value Profile="(Default)">nMnTFBWR59mJ</Value>
+    </Setting>
+    <Setting Name="sshport" Type="System.Int32" Scope="User">
+      <Value Profile="(Default)">22</Value>
+    </Setting>
   </Settings>
 </SettingsFile>
